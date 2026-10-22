@@ -1,0 +1,27 @@
+<Window x:Class="AppAvvio.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="AppAvvio" Width="1080" Height="700" MinWidth="850" MinHeight="540" Background="#F5F7FB" WindowStartupLocation="CenterScreen">
+  <Grid Margin="28">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel Margin="0,0,0,22"><TextBlock Text="Il tuo avvio, nel tuo ordine." FontSize="28" FontWeight="SemiBold" Foreground="#18263E"/><TextBlock Text="Prima le app che ti servono. Il resto può aspettare." Margin="0,8,0,0" Foreground="#59677E"/></StackPanel>
+    <TabControl Grid.Row="1" Background="White" BorderThickness="0">
+      <TabItem Header="Sequenza di avvio">
+        <Grid Margin="16"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <TextBlock Text="L’attesa è calcolata dall’avvio dell’app precedente. Trascina una riga o usa ↑ e ↓." Margin="0,0,0,14" TextWrapping="Wrap"/>
+          <DataGrid x:Name="AppsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal" RowHeight="42" SelectionMode="Single" AllowDrop="True" PreviewMouseLeftButtonDown="DragStart" MouseMove="DragMove" Drop="DropItem">
+            <DataGrid.Columns>
+              <DataGridCheckBoxColumn Header="Attiva" Binding="{Binding Enabled}" Width="55"/>
+              <DataGridTextColumn Header="Applicazione" Binding="{Binding Name}" Width="150"/>
+              <DataGridTextColumn Header="Attesa (s)" Binding="{Binding DelaySeconds, ValidatesOnExceptions=True}" Width="85"/>
+              <DataGridTextColumn Header="Percorso" Binding="{Binding Path}" Width="*"/>
+              <DataGridTextColumn Header="Argomenti" Binding="{Binding Arguments}" Width="100"/>
+              <DataGridTextColumn Header="Stato" Binding="{Binding Status}" IsReadOnly="True" Width="155"/>
+            </DataGrid.Columns>
+          </DataGrid>
+          <WrapPanel Grid.Row="2" Margin="0,14,0,14"><Button Content="Aggiungi app" Click="AddApp"/><Button Content="↑" Click="MoveUp"/><Button Content="↓" Click="MoveDown"/><Button Content="Rimuovi" Click="RemoveApp"/><Button Content="Salva" Click="Save"/><Button x:Name="RunButton" Content="Prova sequenza" Click="Run"/><Button Content="Interrompi" Click="Stop"/></WrapPanel>
+          <StackPanel Grid.Row="3"><CheckBox x:Name="LoginCheck" Content="Avvia AppAvvio quando accedo a Windows" Click="ToggleLogin"/><WrapPanel Margin="0,12,0,0"><Button Content="Controlla conflitti" Click="CheckConflicts"/><Button Content="Apri impostazioni avvio Windows" Click="OpenStartupSettings"/></WrapPanel></StackPanel>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Aggiornamenti e changelog"><Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="Versione installata: 0.1.0 · Anteprima" FontSize="20"/><TextBlock Grid.Row="1" Text="Repository GitHub pubblico (proprietario/repository)" Margin="0,20,0,8"/><DockPanel Grid.Row="2"><Button DockPanel.Dock="Right" Content="Controlla aggiornamenti" Click="CheckUpdates"/><TextBox x:Name="RepositoryBox" Margin="0,0,12,0"/></DockPanel><TextBox Grid.Row="3" x:Name="Changelog" Margin="0,20,0,0" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Text="Configura il repository per leggere le note delle release. L’installazione degli aggiornamenti sarà collegata al sistema di distribuzione."/></Grid></TabItem>
+    </TabControl>
+    <TextBlock Grid.Row="2" x:Name="StatusText" Text="Aggiungi la prima applicazione per iniziare." Margin="0,16,0,0" TextWrapping="Wrap" Foreground="#425574"/>
+  </Grid>
+</Window>
