@@ -18,7 +18,13 @@ Anteprima desktop Windows in C# / .NET 10 / WPF.
 
 ## Limiti dell'anteprima
 
-La schermata mostra le voci Run e i collegamenti nelle cartelle di avvio, filtrando gli stati disabilitati riconosciuti in StartupApproved. Trascinare una voce utente nella sequenza conserva il comando originale e disattiva la voce di Windows. Riportarla a Windows (o rimuoverla dalla sequenza) ripristina la voce originale. Le voci di sistema sono visibili ma richiedono gestione manuale. Attività pianificate, servizi e StartupTask delle app Store non sono ancora elencati. Il rilevamento dei conflitti resta basato sul nome. Il controllo dei processi già attivi funziona per eseguibili con percorso identico, non per collegamenti, launcher e app Store. La finestra è visibile anche all'accesso: modalità tray e notifiche sono da implementare.
+La schermata mostra registro (Run, RunOnce e policy nelle viste 32/64 bit), cartelle di avvio e attività pianificate per accensione/accesso, anche nascoste e nelle sottocartelle. Le voci disabilitate riconosciute vengono escluse. RunOnce, policy e voci di sistema restano consultabili con gestione manuale.
+
+Le attività utente con una sola azione eseguibile e un solo trigger di accesso, senza elevazione o condizioni particolari, possono essere trasferite: viene conservato l'XML nel backup della configurazione, l'attività viene disabilitata e il comando viene eseguito dalla sequenza con argomenti e cartella di lavoro. Il ripristino riabilita l'attività solo se la sua definizione è invariata. Attività di Windows, al boot, elevate o con temporizzazioni/condizioni particolari restano visibili con il motivo della gestione manuale. Gli errori di accesso vengono segnalati come scansione parziale.
+
+Servizi e StartupTask delle app Store non sono ancora elencati. Il controllo dei processi già attivi funziona per eseguibili con percorso identico, non per collegamenti, launcher e app Store. La finestra è visibile anche all'accesso: modalità tray e notifiche sono da implementare.
+
+Test della scansione e del ripristino reale del Task Scheduler: `dotnet run --project tests/AppAvvio.Tests.csproj -c Release -- --scheduler-integration`. Crea una cartella/attività temporanea, senza eseguire il comando, e la rimuove a fine prova.
 
 ## Installazione e aggiornamenti
 

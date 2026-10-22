@@ -47,6 +47,26 @@ try
 }
 finally { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(testKey, false); }
 
+var fixtureSid = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+var taskXml = $"""
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+ <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{fixtureSid}</UserId></LogonTrigger></Triggers>
+ <Principals><Principal id="Author"><UserId>{fixtureSid}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+ <Settings><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Enabled>true</Enabled></Settings>
+ <Actions Context="Author"><Exec><Command>C:\Windows\System32\notepad.exe</Command><Arguments>test.txt</Arguments><WorkingDirectory>C:\Windows</WorkingDirectory></Exec></Actions>
+</Task>
+""";
+var scheduled = ScheduledStartup.Parse("Test", @"\AppAvvioTests\Test", taskXml, fixtureSid)!;
+Check(scheduled.CanManage && scheduled.WorkingDirectory == @"C:\Windows" && scheduled.Command.Contains("test.txt"), "Attività utente importabile con argomenti e cartella di lavoro");
+Check(!ScheduledStartup.Parse("Test", @"\Test", taskXml.Replace("LeastPrivilege", "HighestAvailable"), fixtureSid)!.CanManage, "Attività elevate non convertite in avvii ordinari");
+Check(!ScheduledStartup.Parse("Test", @"\Test", taskXml.Replace("LogonTrigger", "BootTrigger"), fixtureSid)!.CanManage, "Attività prima del login solo consultabili");
+Check(ScheduledStartup.Parse("Test", @"\Test", taskXml.Replace("LogonTrigger", "TimeTrigger"), fixtureSid) == null, "Le attività senza avvio o accesso sono escluse");
+Check(!ScheduledStartup.Parse("Test", @"\Microsoft\Test", taskXml, fixtureSid)!.CanManage, "Attività di Windows solo consultabili");
+Check(ScheduledStartup.SameDefinition(taskXml, taskXml.Replace("<Enabled>true</Enabled></Settings>", "<Enabled>false</Enabled></Settings>")), "Il confronto XML consente il ripristino di una attività disabilitata");
+Check(!ScheduledStartup.SameDefinition(taskXml, taskXml.Replace("test.txt", "changed.txt")), "Una attività aggiornata non viene sovrascritta");
+var registryEntry = new StartupEntry { Name = "32bit", Source = "Registro utente", RegistryViewId = 512 };
+Check(registryEntry.Description.Contains("32 bit"), "Origine registro 32 bit visibile");
+
 var notes = UpdateService.FormatChangelog("""
 [
  {"draft":false,"prerelease":false,"tag_name":"v0.2.0","published_at":"2026-10-22T12:00:00Z","body":"Interfaccia e aggiornamenti"},
@@ -71,6 +91,34 @@ if (args.Contains("--github"))
     Check(File.Exists(Path.Combine(cache, update!.TargetFullRelease.FileName)), "Download e verifica integrità del pacchetto GitHub completati");
     var current = new UpdateService(new Velopack.Locators.TestVelopackLocator("AppAvvio", UpdateService.CurrentVersion, cache));
     Check(await current.CheckAsync() == null, "La versione corrente non propone reinstallazioni");
+}
+
+if (args.Contains("--scheduler-integration"))
+{
+    dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
+    service.Connect();
+    dynamic rootFolder = service.GetFolder("\\");
+    var folderName = "AppAvvioTest-" + Guid.NewGuid().ToString("N");
+    dynamic folder = rootFolder.CreateFolder(folderName);
+    try
+    {
+        dynamic registered = folder.RegisterTask("Test", taskXml, 2, fixtureSid, null, 3);
+        var entry = ScheduledStartup.Parse("Test", "\\" + folderName + "\\Test", (string)registered.Xml, fixtureSid)!;
+        Check(entry.CanManage, "Attività reale riconosciuta come compatibile");
+        Check(StartupCatalog.Read().Any(x => x.Location == entry.Location), "Scansione ricorsiva trova una attività nella sottocartella di prova");
+        StartupCatalog.Disable(entry);
+        Check(!(bool)folder.GetTask("Test").Enabled, "Disattivazione reale della sola attività di prova");
+        StartupCatalog.Restore(entry);
+        Check((bool)folder.GetTask("Test").Enabled, "Ripristino reale dello stato originale");
+        registered = folder.RegisterTask("Test", taskXml.Replace("test.txt", "changed.txt"), 6, fixtureSid, null, 3);
+        try { StartupCatalog.Disable(entry); throw new Exception("Attività modificata disabilitata"); } catch (IOException) { }
+        Check((bool)folder.GetTask("Test").Enabled, "Attività modificata conservata senza interventi");
+    }
+    finally
+    {
+        try { folder.DeleteTask("Test", 0); }
+        finally { rootFolder.DeleteFolder(folderName, 0); }
+    }
 }
 
 if (args.Contains("--render"))
@@ -111,3 +159,4 @@ if (args.Contains("--render"))
     if (failure != null) throw failure;
     Console.WriteLine("PASS: Rendering WPF delle due pagine e della dimensione minima");
 }
+

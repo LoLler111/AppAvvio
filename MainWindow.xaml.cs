@@ -66,7 +66,12 @@ public partial class MainWindow : Window
     }
     private void RefreshWindows(object sender, RoutedEventArgs e)
     {
-        try { windowsItems.Clear(); foreach (var entry in StartupCatalog.Read()) windowsItems.Add(entry); }
+        try
+        {
+            windowsItems.Clear(); foreach (var entry in StartupCatalog.Read()) windowsItems.Add(entry);
+            StatusText.Text = $"{windowsItems.Count} voci trovate: registro, cartelle di avvio e attività pianificate.";
+            if (StartupCatalog.Warnings.Count > 0) StatusText.Text += " Scansione parziale: " + string.Join("; ", StartupCatalog.Warnings.Distinct().Take(2));
+        }
         catch (Exception ex) { StatusText.Text = "Elenco incompleto: " + ex.Message; }
     }
     private void ImportSelected(object sender, RoutedEventArgs e)
@@ -79,7 +84,7 @@ public partial class MainWindow : Window
         LaunchItem? item = null;
         try
         {
-            if (items.Any(x => x.OriginalStartup?.Name == entry.Name && x.OriginalStartup.Source == entry.Source))
+            if (items.Any(x => x.OriginalStartup?.Identity == entry.Identity))
                 throw new InvalidOperationException("App già nella sequenza. La voce originale è ricomparsa: controlla la configurazione prima di importarla nuovamente.");
             item = StartupCatalog.Prepare(entry);
             items.Add(item);
@@ -154,7 +159,7 @@ public partial class MainWindow : Window
         try
         {
             var conflicts = StartupService.FindConflicts(items);
-            if (conflicts.Count == 0) { StatusText.Text = "Nessuna corrispondenza nelle voci Run e nelle cartelle di avvio. Attività pianificate e servizi non sono ancora controllati."; return false; }
+            if (conflicts.Count == 0) { StatusText.Text = "Nessuna corrispondenza nelle origini di avvio accessibili. " + string.Join("; ", StartupCatalog.Warnings.Distinct().Take(2)); return false; }
             MessageBox.Show(this, "Possibili avvii autonomi da verificare nelle impostazioni Windows o nell’app:\n\n" + string.Join("\n", conflicts) + "\n\nIl rilevamento è basato sul nome: una voce potrebbe essere già disabilitata in Windows.", "Controllo avvio", MessageBoxButton.OK, MessageBoxImage.Information);
             return true;
         }

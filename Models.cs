@@ -11,6 +11,7 @@ public sealed class LaunchItem : INotifyPropertyChanged
     public string Name { get; set; } = "";
     public string Path { get; set; } = "";
     public string Arguments { get; set; } = "";
+    public string WorkingDirectory { get; set; } = "";
     public bool Enabled { get; set; } = true;
     public int DelaySeconds { get; set; }
     public StartupEntry? OriginalStartup { get; set; }

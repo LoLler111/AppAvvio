@@ -20,28 +20,13 @@ public static class StartupService
     }
     public static List<string> FindConflicts(IEnumerable<LaunchItem> items)
     {
-        var names = items.Where(x => x.Enabled).Select(x => x.Name).Where(x => x.Length > 2).ToArray();
-        var conflicts = new List<string>();
-        foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
-        {
-            using var key = hive.OpenSubKey(RunKey);
-            if (key == null) continue;
-            foreach (var name in key.GetValueNames().Where(n => n != "AppAvvio"))
-            {
-                var command = key.GetValue(name)?.ToString() ?? "";
-                if (names.Any(n => name.Contains(n, StringComparison.OrdinalIgnoreCase) || command.Contains(n, StringComparison.OrdinalIgnoreCase)))
-                    conflicts.Add($"{name} — {hive.Name}\\{RunKey}");
-            }
-        }
-        foreach (var folder in new[] { Environment.SpecialFolder.Startup, Environment.SpecialFolder.CommonStartup })
-        {
-            var path = Environment.GetFolderPath(folder);
-            if (!Directory.Exists(path)) continue;
-            foreach (var file in Directory.EnumerateFiles(path))
-                if (names.Any(n => System.IO.Path.GetFileNameWithoutExtension(file).Contains(n, StringComparison.OrdinalIgnoreCase)))
-                    conflicts.Add(System.IO.Path.GetFileName(file) + " — cartella Esecuzione automatica");
-        }
-        return conflicts.Distinct().ToList();
+        var managed = items.Where(x => x.Enabled).ToList();
+        return StartupCatalog.Read()
+            .Where(entry => managed.Any(item => item.OriginalStartup != null
+                ? entry.Identity == item.OriginalStartup.Identity
+                : item.Name.Length > 2 && entry.Name.Contains(item.Name, StringComparison.OrdinalIgnoreCase)))
+            .Select(entry => entry.Name + " — " + entry.Description)
+            .Distinct().ToList();
     }
     public static async Task RunAsync(IEnumerable<LaunchItem> items, CancellationToken token)
     {
@@ -57,7 +42,7 @@ public static class StartupService
                 if (System.IO.Path.GetExtension(item.Path).Equals(".exe", StringComparison.OrdinalIgnoreCase) && IsRunning(item.Path))
                 { item.Status = "Già in esecuzione"; continue; }
                 using var process = Process.Start(new ProcessStartInfo(item.Path, item.Arguments)
-                { UseShellExecute = true, WorkingDirectory = System.IO.Path.GetDirectoryName(item.Path)! });
+                { UseShellExecute = true, WorkingDirectory = string.IsNullOrWhiteSpace(item.WorkingDirectory) ? System.IO.Path.GetDirectoryName(item.Path)! : Environment.ExpandEnvironmentVariables(item.WorkingDirectory) });
                 item.Status = "Avvio richiesto";
             }
             catch (OperationCanceledException) { item.Status = "Annullato"; throw; }
@@ -78,3 +63,4 @@ public static class StartupService
         return false;
     }
 }
+
