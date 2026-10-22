@@ -29,6 +29,24 @@ catch (OperationCanceledException) { }
 Check(waiting.Status == "Annullato", "L'attesa può essere annullata");
 Check(later.Status == "Da avviare", "Dopo l'interruzione non vengono avviate altre app");
 
+var parsedCommand = StartupCatalog.ParseCommand("\"C:\\Users\\Test\\Discord\\Update.exe\" --processStart Discord.exe");
+Check(parsedCommand.Path.EndsWith("Update.exe") && parsedCommand.Arguments == "--processStart Discord.exe", "Il launcher di Discord mantiene gli argomenti originali");
+var testKey = @"Software\AppAvvioTests\" + Guid.NewGuid().ToString("N");
+try
+{
+    var original = new StartupEntry { Name = "Test", Command = "\"%LOCALAPPDATA%\\Discord\\Update.exe\" --processStart Discord.exe", Source = "Registro utente", ValueKind = (int)Microsoft.Win32.RegistryValueKind.ExpandString };
+    using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(testKey)) key.SetValue(original.Name, original.Command, Microsoft.Win32.RegistryValueKind.ExpandString);
+    StartupCatalog.Disable(original, testKey);
+    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(testKey)) Check(key!.GetValue(original.Name) == null, "La presa in gestione disattiva la voce originale");
+    StartupCatalog.Restore(original, testKey);
+    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(testKey)) Check(Equals(key!.GetValue(original.Name, null, Microsoft.Win32.RegistryValueOptions.DoNotExpandEnvironmentNames), original.Command) && key.GetValueKind(original.Name) == Microsoft.Win32.RegistryValueKind.ExpandString, "Ripristino esatto del comando e del tipo di registro");
+    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(testKey, true)) key!.SetValue(original.Name, "Changed");
+    try { StartupCatalog.Disable(original, testKey); throw new Exception("Modifica concorrente ignorata"); } catch (IOException) { }
+    try { StartupCatalog.Restore(original, testKey); throw new Exception("Voce diversa sovrascritta"); } catch (IOException) { }
+    Check(true, "Le modifiche concorrenti non vengono cancellate o sovrascritte");
+}
+finally { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(testKey, false); }
+
 var notes = UpdateService.FormatChangelog("""
 [
  {"draft":false,"prerelease":false,"tag_name":"v0.2.0","published_at":"2026-10-22T12:00:00Z","body":"Interfaccia e aggiornamenti"},
@@ -79,8 +97,8 @@ if (args.Contains("--render"))
                 using var file = File.Create("artifacts/screenshots/" + name + ".png");
                 encoder.Save(file);
             }
-            Render("sequence", 1220, 780);
-            Render("sequence-small", 1020, 680);
+            Render("sequence", 1220, 910);
+            Render("sequence-small", 1020, 810);
             ((RadioButton)window.FindName("UpdatesNav")).IsChecked = true;
             Render("updates", 1220, 780);
             window.Close();

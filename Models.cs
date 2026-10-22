@@ -13,6 +13,7 @@ public sealed class LaunchItem : INotifyPropertyChanged
     public string Arguments { get; set; } = "";
     public bool Enabled { get; set; } = true;
     public int DelaySeconds { get; set; }
+    public StartupEntry? OriginalStartup { get; set; }
     [System.Text.Json.Serialization.JsonIgnore]
     public string Status { get => status; set { status = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status))); } }
     public event PropertyChangedEventHandler? PropertyChanged;

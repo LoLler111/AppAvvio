@@ -18,7 +18,7 @@ Anteprima desktop Windows in C# / .NET 10 / WPF.
 
 ## Limiti dell'anteprima
 
-Il rilevamento dei conflitti usa il nome e può includere voci disabilitate da Windows. Non gestisce ancora StartupApproved, attività pianificate, servizi o ripristino delle voci originali. Non disabilita automaticamente altre applicazioni. Il controllo dei processi già attivi funziona per eseguibili con percorso identico, non per collegamenti, launcher e app Store. La finestra è visibile anche all'accesso: modalità tray e notifiche sono da implementare.
+La schermata mostra le voci Run e i collegamenti nelle cartelle di avvio, filtrando gli stati disabilitati riconosciuti in StartupApproved. Trascinare una voce utente nella sequenza conserva il comando originale e disattiva la voce di Windows. Riportarla a Windows (o rimuoverla dalla sequenza) ripristina la voce originale. Le voci di sistema sono visibili ma richiedono gestione manuale. Attività pianificate, servizi e StartupTask delle app Store non sono ancora elencati. Il rilevamento dei conflitti resta basato sul nome. Il controllo dei processi già attivi funziona per eseguibili con percorso identico, non per collegamenti, launcher e app Store. La finestra è visibile anche all'accesso: modalità tray e notifiche sono da implementare.
 
 ## Installazione e aggiornamenti
 

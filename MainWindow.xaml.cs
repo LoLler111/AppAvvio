@@ -20,10 +20,13 @@ public partial class MainWindow : Window
     private readonly UpdateService updates = new();
     private UpdateInfo? availableUpdate;
     private bool updateBusy;
+    private Point windowsDragOrigin;
+    private readonly ObservableCollection<StartupEntry> windowsItems = [];
     public MainWindow()
     {
         InitializeComponent();
         AppsGrid.ItemsSource = items;
+        WindowsApps.ItemsSource = windowsItems;
         try
         {
             var config = SettingsStore.Load();
@@ -37,6 +40,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { loadFailed = true; StatusText.Text = "Configurazione non caricata: " + ex.Message; }
         EmptyState.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         items.CollectionChanged += (_, _) => EmptyState.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        RefreshWindows(this, new RoutedEventArgs());
         Closing += (_, e) => { if (updateBusy) { e.Cancel = true; StatusText.Text = "Attendi il completamento dell’operazione."; } else running?.Cancel(); };
     }
     private void AddApp(object sender, RoutedEventArgs e)
@@ -55,7 +59,67 @@ public partial class MainWindow : Window
         var index = AppsGrid.SelectedIndex;
         if (index >= 0 && index + offset >= 0 && index + offset < items.Count) items.Move(index, index + offset);
     }
-    private void RemoveApp(object sender, RoutedEventArgs e) { if (running == null && AppsGrid.SelectedItem is LaunchItem item) items.Remove(item); }
+    private void RemoveApp(object sender, RoutedEventArgs e)
+    {
+        if (running != null || updateBusy || AppsGrid.SelectedItem is not LaunchItem item) return;
+        ReturnItem(item);
+    }
+    private void RefreshWindows(object sender, RoutedEventArgs e)
+    {
+        try { windowsItems.Clear(); foreach (var entry in StartupCatalog.Read()) windowsItems.Add(entry); }
+        catch (Exception ex) { StatusText.Text = "Elenco incompleto: " + ex.Message; }
+    }
+    private void ImportSelected(object sender, RoutedEventArgs e)
+    {
+        if (WindowsApps.SelectedItem is StartupEntry entry) ImportEntry(entry);
+    }
+    private void ImportEntry(StartupEntry entry)
+    {
+        if (running != null || updateBusy || !SaveConfiguration()) return;
+        LaunchItem? item = null;
+        try
+        {
+            if (items.Any(x => x.OriginalStartup?.Name == entry.Name && x.OriginalStartup.Source == entry.Source))
+                throw new InvalidOperationException("App già nella sequenza. La voce originale è ricomparsa: controlla la configurazione prima di importarla nuovamente.");
+            item = StartupCatalog.Prepare(entry);
+            items.Add(item);
+            if (!SaveConfiguration()) { items.Remove(item); return; }
+            StartupService.Register(true);
+            LoginCheck.IsChecked = true;
+            StartupCatalog.Disable(entry);
+            StatusText.Text = entry.Name + " ora è nella tua sequenza. L’avvio originale è conservato per il ripristino.";
+        }
+        catch (Exception ex)
+        {
+            if (item != null) { items.Remove(item); SaveConfiguration(); }
+            StatusText.Text = "Spostamento non completato: " + ex.Message;
+        }
+        RefreshWindows(this, new RoutedEventArgs());
+    }
+    private void ReturnItem(LaunchItem item)
+    {
+        if (!SaveConfiguration()) return;
+        try
+        {
+            if (item.OriginalStartup != null) StartupCatalog.Restore(item.OriginalStartup);
+            items.Remove(item);
+            if (!SaveConfiguration()) { items.Add(item); return; }
+            RefreshWindows(this, new RoutedEventArgs());
+            StatusText.Text = item.OriginalStartup == null ? "App rimossa dalla sequenza." : "Avvio originale ripristinato per " + item.Name;
+        }
+        catch (Exception ex) { StatusText.Text = "Ripristino non completato: " + ex.Message; }
+    }
+    private void WindowsDragStart(object sender, MouseButtonEventArgs e) => windowsDragOrigin = e.GetPosition(WindowsApps);
+    private void WindowsDragMove(object sender, MouseEventArgs e)
+    {
+        if (running == null && !updateBusy && e.LeftButton == MouseButtonState.Pressed && Math.Abs(e.GetPosition(WindowsApps).Y - windowsDragOrigin.Y) > SystemParameters.MinimumVerticalDragDistance && WindowsApps.SelectedItem is StartupEntry entry)
+            DragDrop.DoDragDrop(WindowsApps, entry, DragDropEffects.Move);
+    }
+    private void ReturnToWindows(object sender, DragEventArgs e)
+    {
+        if (running == null && !updateBusy && e.Data.GetData(typeof(LaunchItem)) is LaunchItem item && item.OriginalStartup != null) ReturnItem(item);
+        e.Handled = true;
+    }
     private bool SaveConfiguration()
     {
         if (loadFailed) { StatusText.Text = "Salvataggio bloccato per conservare la configurazione non leggibile. Controlla " + SettingsStore.FilePath; return false; }
@@ -116,6 +180,7 @@ public partial class MainWindow : Window
     }
     private void DropItem(object sender, DragEventArgs e)
     {
+        if (e.Data.GetData(typeof(StartupEntry)) is StartupEntry entry) { ImportEntry(entry); e.Handled = true; return; }
         if (running != null || e.Data.GetData(typeof(LaunchItem)) is not LaunchItem item) return;
         var row = ItemsControl.ContainerFromElement(AppsGrid, e.OriginalSource as DependencyObject) as DataGridRow;
         if (row?.Item is LaunchItem target && target != item) items.Move(items.IndexOf(item), items.IndexOf(target));
