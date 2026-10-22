@@ -1,0 +1,37 @@
+name: Build and release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versione (es. 0.2.1)'
+        required: true
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test
+        run: dotnet run --project tests/AppAvvio.Tests.csproj -c Release
+      - name: Package
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:GITHUB_REF_NAME.TrimStart('v') }
+          ./scripts/release.ps1 -Version $version
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = (Get-ChildItem artifacts/releases -File).FullName
+          gh release create "v$env:RELEASE_VERSION" @assets --title "AppAvvio $env:RELEASE_VERSION" --notes-file release-notes.md --target $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Pubblicazione fallita' }

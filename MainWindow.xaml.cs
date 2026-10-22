@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
-using System.Text.RegularExpressions;
+using Velopack;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -17,6 +17,9 @@ public partial class MainWindow : Window
     private CancellationTokenSource? running;
     private Point dragOrigin;
     private bool loadFailed;
+    private readonly UpdateService updates = new();
+    private UpdateInfo? availableUpdate;
+    private bool updateBusy;
     public MainWindow()
     {
         InitializeComponent();
@@ -25,13 +28,16 @@ public partial class MainWindow : Window
         {
             var config = SettingsStore.Load();
             foreach (var item in config.Items) items.Add(item);
-            RepositoryBox.Text = config.Repository;
+            VersionText.Text = "Versione installata: " + UpdateService.CurrentVersion;
+            SidebarVersion.Text = "Versione " + UpdateService.CurrentVersion;
             LoginCheck.IsChecked = StartupService.IsRegistered();
             var cache = Path.Combine(SettingsStore.Folder, "changelog.txt");
             if (File.Exists(cache)) Changelog.Text = File.ReadAllText(cache);
         }
         catch (Exception ex) { loadFailed = true; StatusText.Text = "Configurazione non caricata: " + ex.Message; }
-        Closing += (_, _) => running?.Cancel();
+        EmptyState.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        items.CollectionChanged += (_, _) => EmptyState.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        Closing += (_, e) => { if (updateBusy) { e.Cancel = true; StatusText.Text = "Attendi il completamento dell’operazione."; } else running?.Cancel(); };
     }
     private void AddApp(object sender, RoutedEventArgs e)
     {
@@ -56,20 +62,21 @@ public partial class MainWindow : Window
         if (!AppsGrid.CommitEdit(DataGridEditingUnit.Cell, true) || !AppsGrid.CommitEdit(DataGridEditingUnit.Row, true)) return false;
         if (items.Any(x => string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Path) || x.DelaySeconds < 0 || x.DelaySeconds > 86400))
         { StatusText.Text = "Ogni app richiede nome, percorso e un’attesa fra 0 e 86400 secondi."; return false; }
-        try { SettingsStore.Save(new Configuration { Items = items.ToList(), Repository = RepositoryBox.Text.Trim() }); StatusText.Text = "Configurazione salvata."; return true; }
+        try { SettingsStore.Save(new Configuration { Items = items.ToList(), Repository = UpdateService.Repository }); StatusText.Text = "Configurazione salvata."; return true; }
         catch (Exception ex) { StatusText.Text = "Salvataggio fallito: " + ex.Message; return false; }
     }
     private void Save(object sender, RoutedEventArgs e) => SaveConfiguration();
     private async void Run(object sender, RoutedEventArgs e) => await RunSequence();
     private async Task RunSequence()
     {
-        if (running != null || !SaveConfiguration()) return;
+        if (running != null || updateBusy || !SaveConfiguration()) return;
         running = new CancellationTokenSource();
         AppsGrid.IsEnabled = false;
         RunButton.IsEnabled = false;
+        InstallUpdateButton.IsEnabled = false;
         try { StatusText.Text = "Sequenza in esecuzione…"; await StartupService.RunAsync(items.ToList(), running.Token); StatusText.Text = "Sequenza terminata. Controlla lo stato di ogni applicazione."; }
         catch (OperationCanceledException) { StatusText.Text = "Sequenza interrotta. Le app già avviate restano aperte."; }
-        finally { running.Dispose(); running = null; AppsGrid.IsEnabled = true; RunButton.IsEnabled = true; }
+        finally { running.Dispose(); running = null; AppsGrid.IsEnabled = true; RunButton.IsEnabled = true; InstallUpdateButton.IsEnabled = availableUpdate != null && !updateBusy; }
     }
     private void Stop(object sender, RoutedEventArgs e) => running?.Cancel();
     private void ToggleLogin(object sender, RoutedEventArgs e)
@@ -113,25 +120,77 @@ public partial class MainWindow : Window
         var row = ItemsControl.ContainerFromElement(AppsGrid, e.OriginalSource as DependencyObject) as DataGridRow;
         if (row?.Item is LaunchItem target && target != item) items.Move(items.IndexOf(item), items.IndexOf(target));
     }
+    private void ShowSequence(object sender, RoutedEventArgs e)
+    {
+        if (SequencePage == null) return;
+        SequencePage.Visibility = Visibility.Visible;
+        UpdatesPage.Visibility = Visibility.Collapsed;
+    }
+    private void ShowUpdates(object sender, RoutedEventArgs e)
+    {
+        if (UpdatesPage == null) return;
+        SequencePage.Visibility = Visibility.Collapsed;
+        UpdatesPage.Visibility = Visibility.Visible;
+    }
     private async void CheckUpdates(object sender, RoutedEventArgs e)
     {
-        var repo = RepositoryBox.Text.Trim();
-        if (!Regex.IsMatch(repo, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")) { StatusText.Text = "Inserisci il repository nel formato proprietario/nome."; return; }
-        if (!SaveConfiguration()) return;
+        if (updateBusy) return;
+        updateBusy = true;
+        CheckUpdateButton.IsEnabled = false;
+        InstallUpdateButton.IsEnabled = false;
+        availableUpdate = null;
+        UpdateStatus.Text = "Controllo delle release di AppAvvio…";
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("AppAvvio/0.1.0");
-            var json = await client.GetStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=20");
-            using var document = JsonDocument.Parse(json);
-            var notes = document.RootElement.EnumerateArray().Where(x => !x.GetProperty("draft").GetBoolean()).Select(x =>
-                $"{x.GetProperty("tag_name").GetString()} — {x.GetProperty("published_at").GetString()}\n\n{x.GetProperty("body").GetString()}");
-            var text = string.Join("\n\n────────────────────\n\n", notes);
-            Changelog.Text = string.IsNullOrWhiteSpace(text) ? "Nessuna release pubblicata." : text;
-            Directory.CreateDirectory(SettingsStore.Folder);
-            File.WriteAllText(Path.Combine(SettingsStore.Folder, "changelog.txt"), Changelog.Text);
-            StatusText.Text = "Note delle release aggiornate. Installazione automatica non ancora disponibile in questa anteprima.";
+            try { Changelog.Text = await updates.LoadChangelogAsync(); }
+            catch (Exception ex) { StatusText.Text = "Storico non aggiornato: " + ex.Message; }
+            if (!updates.IsInstalled)
+            {
+                UpdateStatus.Text = "Versione di sviluppo: installa AppAvvio con il Setup della release per abilitare gli aggiornamenti.";
+                return;
+            }
+            availableUpdate = await updates.CheckAsync();
+            UpdateStatus.Text = availableUpdate == null ? "AppAvvio è aggiornato."
+                : $"Disponibile la versione {availableUpdate.TargetFullRelease.Version}. Leggi le novità, poi scarica e installa.";
         }
-        catch (Exception ex) { StatusText.Text = "Impossibile recuperare le release. Lo storico precedente resta disponibile. " + ex.Message; }
+        catch (Exception ex) { UpdateStatus.Text = "Controllo non riuscito. Riprova più tardi. " + ex.Message; }
+        finally
+        {
+            updateBusy = false;
+            CheckUpdateButton.IsEnabled = true;
+            InstallUpdateButton.IsEnabled = availableUpdate != null && running == null;
+        }
+    }
+    private async void InstallUpdate(object sender, RoutedEventArgs e)
+    {
+        if (updateBusy || running != null || availableUpdate == null || !SaveConfiguration()) return;
+        updateBusy = true;
+        CheckUpdateButton.IsEnabled = false;
+        InstallUpdateButton.IsEnabled = false;
+        RunButton.IsEnabled = false;
+        SequencePage.IsEnabled = false;
+        DownloadProgress.Visibility = Visibility.Visible;
+        var progress = new Progress<int>(value =>
+        {
+            DownloadProgress.Value = value;
+            UpdateStatus.Text = $"Download e verifica dell’aggiornamento… {value}%";
+        });
+        try
+        {
+            await updates.DownloadAsync(availableUpdate, value => ((IProgress<int>)progress).Report(value));
+            UpdateStatus.Text = "Installazione e riavvio in corso…";
+            updateBusy = false;
+            updates.ApplyAndRestart(availableUpdate);
+        }
+        catch (Exception ex) { UpdateStatus.Text = "Aggiornamento non completato. Puoi riprovare. " + ex.Message; }
+        finally
+        {
+            updateBusy = false;
+            CheckUpdateButton.IsEnabled = true;
+            InstallUpdateButton.IsEnabled = availableUpdate != null;
+            RunButton.IsEnabled = true;
+            SequencePage.IsEnabled = true;
+            DownloadProgress.Visibility = Visibility.Collapsed;
+        }
     }
 }
