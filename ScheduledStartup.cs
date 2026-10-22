@@ -9,7 +9,7 @@ public static class ScheduledStartup
 {
     private static readonly XNamespace Ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
     private static void Release(object? value) { if (value != null && Marshal.IsComObject(value)) Marshal.FinalReleaseComObject(value); }
-    public static List<StartupEntry> Read(List<string> warnings)
+    public static List<StartupEntry> Read(List<string> warnings, bool includeDisabled = false)
     {
         var result = new List<StartupEntry>();
         dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
@@ -17,13 +17,13 @@ public static class ScheduledStartup
         {
             service.Connect();
             dynamic root = service.GetFolder("\\");
-            try { Walk(root, result, warnings); }
+            try { Walk(root, result, warnings, includeDisabled); }
             finally { Release(root); }
         }
         finally { Release(service); }
         return result;
     }
-    private static void Walk(dynamic folder, List<StartupEntry> entries, List<string> warnings)
+    private static void Walk(dynamic folder, List<StartupEntry> entries, List<string> warnings, bool includeDisabled)
     {
         object? tasks = null;
         object? folders = null;
@@ -35,9 +35,9 @@ public static class ScheduledStartup
                 dynamic task = ((dynamic)tasks)[i];
                 try
                 {
-                    if (!(bool)task.Enabled) continue;
+                    if (!(bool)task.Enabled && !includeDisabled) continue;
                     var entry = Parse((string)task.Name, (string)task.Path, (string)task.Xml, WindowsIdentity.GetCurrent().User!.Value);
-                    if (entry != null) entries.Add(entry);
+                    if (entry != null) { entry.IsEnabled = (bool)task.Enabled; entries.Add(entry); }
                 }
                 catch (Exception ex) { warnings.Add("Attività non leggibile: " + ex.Message); }
                 finally { Release(task); }
@@ -46,7 +46,7 @@ public static class ScheduledStartup
             for (var i = 1; i <= ((dynamic)folders).Count; i++)
             {
                 dynamic child = ((dynamic)folders)[i];
-                try { Walk(child, entries, warnings); }
+                try { Walk(child, entries, warnings, includeDisabled); }
                 finally { Release(child); }
             }
         }

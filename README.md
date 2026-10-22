@@ -26,6 +26,13 @@ Servizi e StartupTask delle app Store non sono ancora elencati. Il controllo dei
 
 Test della scansione e del ripristino reale del Task Scheduler: `dotnet run --project tests/AppAvvio.Tests.csproj -c Release -- --scheduler-integration`. Crea una cartella/attività temporanea, senza eseguire il comando, e la rimuove a fine prova.
 
+
+## Controlli e disattivazione diretta (0.5.0)
+
+All'apertura, con **Aggiorna elenco**, **Controlla conflitti** e **Controlla aggiornamenti**, la sequenza viene confrontata con le origini accessibili. La colonna Configurazione indica percorsi mancanti, voci originali riattivate o modificate, attività originali eliminate e possibili avvii equivalenti in un'altra origine. Una scansione incompleta non viene dichiarata valida. Lo stato di esecuzione rimane separato e non nasconde questi avvisi. Il controllo verifica la presenza del file o collegamento configurato, non la destinazione interna di un collegamento.
+
+Selezionare una voce gestibile nell'elenco Windows e premere **Disattiva** per fermarne l'avvio automatico senza aggiungerla alla sequenza. Le voci disattivate da AppAvvio rimangono visibili e si possono ripristinare con **Riattiva**, anche dopo la riapertura. Comandi, collegamenti e definizioni delle attività restano nel backup della configurazione. Voci di sistema o con vincoli non convertibili richiedono gestione manuale. I controlli non applicano correzioni automatiche.
+
 ## Installazione e aggiornamenti
 
 Scaricare `AppAvvio-win-Setup.exe` dalle [release](https://github.com/LoLler111/AppAvvio/releases/latest). Dopo la prima installazione, aprire **Aggiornamenti → Controlla aggiornamenti → Scarica e installa**. L'app scarica e verifica il pacchetto, poi si riavvia. Non è consentito aggiornare durante una sequenza attiva. Impostazioni e backup restano nella cartella dati separata dai binari. Le build lanciate con `dotnet run` leggono il changelog ma non si aggiornano.

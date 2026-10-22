@@ -8,6 +8,7 @@ namespace AppAvvio;
 public sealed class LaunchItem : INotifyPropertyChanged
 {
     private string status = "Da avviare";
+    private string health = "Da verificare";
     public string Name { get; set; } = "";
     public string Path { get; set; } = "";
     public string Arguments { get; set; } = "";
@@ -18,11 +19,14 @@ public sealed class LaunchItem : INotifyPropertyChanged
     [System.Text.Json.Serialization.JsonIgnore]
     public string Status { get => status; set { status = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status))); } }
     public event PropertyChangedEventHandler? PropertyChanged;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string Health { get => health; set { health = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Health))); } }
 }
 
 public sealed class Configuration
 {
     public List<LaunchItem> Items { get; set; } = [];
+    public List<StartupEntry> DisabledStartup { get; set; } = [];
     public string Repository { get; set; } = "";
 }
 

@@ -16,9 +16,10 @@ public sealed class StartupEntry
     public string TaskXml { get; set; } = "";
     public string WorkingDirectory { get; set; } = "";
     public string ManualReason { get; set; } = "";
+    public bool IsEnabled { get; set; } = true;
     public string Identity => Source + "|" + (RegistryViewId == 0 ? (Environment.Is64BitProcess ? 256 : 512) : RegistryViewId) + "|" + RegistryPath + "|" + Location + "|" + Name;
     public bool CanManage => ManualReason.Length == 0 && (Source is "Registro utente" or "Cartella utente" or "Task Scheduler");
-    public string Description => Source + (Source.StartsWith("Registro") ? (RegistryViewId == 512 ? " · 32 bit" : " · 64 bit") + " · " + RegistryPath.Split('\\').Last() : "") + (CanManage ? "" : " · " + (ManualReason.Length > 0 ? ManualReason : "gestione manuale"));
+    public string Description => (IsEnabled ? "Attiva · " : "Disattivata · ") + Source + (Source.StartsWith("Registro") ? (RegistryViewId == 512 ? " · 32 bit" : " · 64 bit") + " · " + RegistryPath.Split('\\').Last() : "") + (CanManage ? "" : " · " + (ManualReason.Length > 0 ? ManualReason : "gestione manuale"));
     public string Details => Location.Length > 0 ? Location + "\n" + Command : RegistryPath + "\n" + Command;
 }
 
@@ -26,7 +27,7 @@ public static class StartupCatalog
 {
     public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     public static List<string> Warnings { get; } = [];
-    public static List<StartupEntry> Read()
+    public static List<StartupEntry> Read(bool includeDisabled = false)
     {
         var result = new List<StartupEntry>();
         Warnings.Clear();
@@ -42,12 +43,13 @@ public static class StartupCatalog
             if (key == null) continue;
             foreach (var name in key.GetValueNames().Where(n => n != "AppAvvio"))
             {
-                if (path == RunKey && approved?.GetValue(name) is byte[] state && state.Length > 0 && state[0] is 3 or 7) continue;
+                var enabled = !(path == RunKey && approved?.GetValue(name) is byte[] state && state.Length > 0 && state[0] is 3 or 7);
+                if (!enabled && !includeDisabled) continue;
                 if (key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is string command)
                 {
                     // Some registry keys are shared between the two WOW64 views.
                     if (!machine && result.Any(x => x.Source == "Registro utente" && x.RegistryPath == path && x.Name == name && x.Command == command)) continue;
-                    result.Add(new() { Name = name, Command = command, Source = machine ? "Registro sistema" : "Registro utente", ValueKind = (int)key.GetValueKind(name), RegistryPath = path, RegistryViewId = (int)view,
+                    result.Add(new() { Name = name, Command = command, Source = machine ? "Registro sistema" : "Registro utente", ValueKind = (int)key.GetValueKind(name), RegistryPath = path, RegistryViewId = (int)view, IsEnabled = enabled,
                         ManualReason = path.EndsWith("RunOnce") ? "esecuzione unica" : path.Contains("Policies") ? "gestita da policy" : machine ? "richiede gestione di sistema" : "" });
                 }
             }
@@ -63,13 +65,14 @@ public static class StartupCatalog
             using var approved = (common ? Registry.LocalMachine : Registry.CurrentUser).OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder");
             foreach (var file in Directory.EnumerateFiles(folder).Where(f => !Path.GetFileName(f).Equals("desktop.ini", StringComparison.OrdinalIgnoreCase)))
             {
-                if (approved?.GetValue(Path.GetFileName(file)) is byte[] state && state.Length > 0 && state[0] is 3 or 7) continue;
-                result.Add(new() { Name = Path.GetFileNameWithoutExtension(file), Location = file, Source = common ? "Cartella sistema" : "Cartella utente" });
+                var enabled = !(approved?.GetValue(Path.GetFileName(file)) is byte[] state && state.Length > 0 && state[0] is 3 or 7);
+                if (!enabled && !includeDisabled) continue;
+                result.Add(new() { Name = Path.GetFileNameWithoutExtension(file), Location = file, Source = common ? "Cartella sistema" : "Cartella utente", IsEnabled = enabled });
             }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException) { Warnings.Add("Cartella di avvio: " + ex.Message); }
         }
-        try { result.AddRange(ScheduledStartup.Read(Warnings)); }
+        try { result.AddRange(ScheduledStartup.Read(Warnings, includeDisabled)); }
         catch (Exception ex) { Warnings.Add("Task Scheduler: " + ex.Message); }
         return result.OrderBy(x => x.Name).ToList();
     }
@@ -96,12 +99,16 @@ public static class StartupCatalog
         if (!File.Exists(path)) throw new FileNotFoundException("Percorso di avvio non trovato: " + path);
         if (entry.Source == "Cartella utente")
         {
-            Directory.CreateDirectory(Path.Combine(SettingsStore.Folder, "startup-backups"));
-            entry.BackupPath = Path.Combine(SettingsStore.Folder, "startup-backups", Guid.NewGuid() + Path.GetExtension(path));
-            File.Copy(path, entry.BackupPath);
+            BackupShortcut(entry);
             path = entry.BackupPath;
         }
         return new() { Name = entry.Name, Path = path, Arguments = args, WorkingDirectory = entry.WorkingDirectory, OriginalStartup = entry };
+    }
+    public static void BackupShortcut(StartupEntry entry)
+    {
+        Directory.CreateDirectory(Path.Combine(SettingsStore.Folder, "startup-backups"));
+        entry.BackupPath = Path.Combine(SettingsStore.Folder, "startup-backups", Guid.NewGuid() + Path.GetExtension(entry.Location));
+        File.Copy(entry.Location, entry.BackupPath);
     }
     public static void Disable(StartupEntry entry, string registryPath = RunKey)
     {

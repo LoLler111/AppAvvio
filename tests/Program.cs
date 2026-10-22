@@ -67,6 +67,28 @@ Check(!ScheduledStartup.SameDefinition(taskXml, taskXml.Replace("test.txt", "cha
 var registryEntry = new StartupEntry { Name = "32bit", Source = "Registro utente", RegistryViewId = 512 };
 Check(registryEntry.Description.Contains("32 bit"), "Origine registro 32 bit visibile");
 
+var auditOriginal = new StartupEntry { Name = "Chat", Source = "Registro utente", Command = "\"C:\\Chat\\Update.exe\" --start Chat.exe" };
+var auditItem = new LaunchItem { Name = "Chat", Path = @"C:\Chat\Update.exe", Arguments = "--start Chat.exe", OriginalStartup = auditOriginal };
+Check(SequenceAudit.Check(auditItem, [], false, _ => true) == "Configurazione OK", "Voce rimossa da Windows e sequenza presente sono una configurazione valida");
+Check(SequenceAudit.Check(auditItem, [auditOriginal], false, _ => true).Contains("riattivato"), "Rilevato ritorno dell'avvio originale");
+var changedOriginal = new StartupEntry { Name = "Chat", Source = "Registro utente", Command = "\"C:\\Chat\\New.exe\"" };
+Check(SequenceAudit.Check(auditItem, [changedOriginal], false, _ => true).Contains("comando modificato"), "Rilevato comando cambiato dopo un aggiornamento");
+var otherSource = new StartupEntry { Name = "NewChatLauncher", Source = "Task Scheduler", Command = auditOriginal.Command, Location = @"\NewChat" };
+Check(SequenceAudit.Check(auditItem, [otherSource], false, _ => true).Contains("Possibile altro avvio"), "Rilevato avvio equivalente in una origine differente");
+otherSource.IsEnabled = false;
+Check(SequenceAudit.Check(auditItem, [otherSource], false, _ => true) == "Configurazione OK", "Gli avvii disabilitati non sono segnalati come conflitti");
+Check(SequenceAudit.Check(auditItem, [], false, _ => false).Contains("File non trovato"), "Percorso della sequenza mancante segnalato");
+Check(SequenceAudit.Check(auditItem, [], true, _ => true).Contains("parziale"), "Una scansione incompleta non viene dichiarata valida");
+var taskItem = new LaunchItem { Name = scheduled.Name, Path = @"C:\Windows\System32\notepad.exe", OriginalStartup = scheduled };
+var disabledScheduled = ScheduledStartup.Parse(scheduled.Name, scheduled.Location, scheduled.TaskXml, fixtureSid)!;
+disabledScheduled.IsEnabled = false;
+Check(SequenceAudit.Check(taskItem, [disabledScheduled], false, _ => true) == "Configurazione OK", "Attività originale disabilitata e invariata è attesa");
+Check(SequenceAudit.Check(taskItem, [], false, _ => true).Contains("Attività originale non trovata"), "Attività di backup eliminata viene segnalata");
+Check(auditItem.Path == @"C:\Chat\Update.exe" && auditOriginal.Command.Contains("--start Chat.exe"), "Il controllo non modifica percorso o backup");
+var backupJson = System.Text.Json.JsonSerializer.Serialize(new Configuration { DisabledStartup = [scheduled, auditOriginal] });
+var backupConfig = System.Text.Json.JsonSerializer.Deserialize<Configuration>(backupJson)!;
+Check(backupConfig.DisabledStartup.Count == 2 && backupConfig.Items.Count == 0 && backupConfig.DisabledStartup[0].TaskXml == taskXml, "Disattivazione indipendente dalla sequenza conserva i backup dopo la riapertura");
+
 var notes = UpdateService.FormatChangelog("""
 [
  {"draft":false,"prerelease":false,"tag_name":"v0.2.0","published_at":"2026-10-22T12:00:00Z","body":"Interfaccia e aggiornamenti"},
@@ -131,6 +153,13 @@ if (args.Contains("--render"))
             var app = new App();
             app.InitializeComponent();
             var window = new MainWindow();
+            var grid = (DataGrid)window.FindName("AppsGrid");
+            var previewItems = (System.Collections.ObjectModel.ObservableCollection<LaunchItem>)grid.ItemsSource;
+            if (previewItems.Count == 0)
+            {
+                previewItems.Add(new LaunchItem { Name = "Discord", Path = @"C:\Discord\Update.exe", Health = "Avvio Windows riattivato", DelaySeconds = 0 });
+                previewItems.Add(new LaunchItem { Name = "Steam", Path = @"C:\Steam\Steam.exe", Health = "Configurazione OK", DelaySeconds = 90 });
+            }
             var root = (FrameworkElement)window.Content;
             Directory.CreateDirectory("artifacts/screenshots");
             void Render(string name, int width, int height)

@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private bool updateBusy;
     private Point windowsDragOrigin;
     private readonly ObservableCollection<StartupEntry> windowsItems = [];
+    private readonly List<StartupEntry> disabledStartup = [];
     public MainWindow()
     {
         InitializeComponent();
@@ -31,6 +32,7 @@ public partial class MainWindow : Window
         {
             var config = SettingsStore.Load();
             foreach (var item in config.Items) items.Add(item);
+            disabledStartup.AddRange(config.DisabledStartup);
             VersionText.Text = "Versione installata: " + UpdateService.CurrentVersion;
             SidebarVersion.Text = "Versione " + UpdateService.CurrentVersion;
             LoginCheck.IsChecked = StartupService.IsRegistered();
@@ -68,19 +70,94 @@ public partial class MainWindow : Window
     {
         try
         {
-            windowsItems.Clear(); foreach (var entry in StartupCatalog.Read()) windowsItems.Add(entry);
+            var snapshot = StartupCatalog.Read(includeDisabled: true);
+            windowsItems.Clear(); foreach (var entry in snapshot.Where(x => x.IsEnabled)) windowsItems.Add(entry);
+            foreach (var entry in disabledStartup.Where(x => !snapshot.Any(s => s.Identity == x.Identity && s.IsEnabled)))
+            {
+                var disabled = snapshot.FirstOrDefault(x => x.Identity == entry.Identity) ?? entry;
+                disabled.IsEnabled = false;
+                windowsItems.Add(disabled);
+            }
+            foreach (var item in items) item.Health = SequenceAudit.Check(item, snapshot, StartupCatalog.Warnings.Count > 0);
+            var problems = items.Count(x => x.Health != "Configurazione OK");
+            SequenceHealthText.Text = problems == 0
+                ? "Controllo sequenza: nessun problema rilevato nelle origini accessibili."
+                : $"Controllo sequenza: {problems} app da verificare. " + string.Join(" · ", items.Where(x => x.Health != "Configurazione OK").Select(x => x.Name + ": " + x.Health));
+            SequenceHealthText.Visibility = items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             StatusText.Text = $"{windowsItems.Count} voci trovate: registro, cartelle di avvio e attività pianificate.";
             if (StartupCatalog.Warnings.Count > 0) StatusText.Text += " Scansione parziale: " + string.Join("; ", StartupCatalog.Warnings.Distinct().Take(2));
         }
-        catch (Exception ex) { StatusText.Text = "Elenco incompleto: " + ex.Message; }
+        catch (Exception ex)
+        {
+            foreach (var item in items) item.Health = "Verifica non riuscita";
+            SequenceHealthText.Text = "Controllo sequenza non completato: " + ex.Message;
+            SequenceHealthText.Visibility = Visibility.Visible;
+            StatusText.Text = "Elenco incompleto: " + ex.Message;
+        }
     }
     private void ImportSelected(object sender, RoutedEventArgs e)
     {
-        if (WindowsApps.SelectedItem is StartupEntry entry) ImportEntry(entry);
+        if (WindowsApps.SelectedItem is StartupEntry entry)
+        {
+            if (!entry.IsEnabled) { StatusText.Text = "Riattiva prima questa voce per trasferirla nella sequenza."; return; }
+            ImportEntry(entry);
+        }
+    }
+    private void WindowsSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ToggleStartupButton == null) return;
+        var entry = WindowsApps.SelectedItem as StartupEntry;
+        ToggleStartupButton.Content = entry?.IsEnabled == false ? "Riattiva" : "Disattiva";
+        ToggleStartupButton.IsEnabled = entry != null && entry.CanManage && (entry.IsEnabled || disabledStartup.Any(x => x.Identity == entry.Identity));
+        ToggleStartupButton.ToolTip = entry?.CanManage == false ? entry.Description : "Modifica solo l’avvio Windows della voce selezionata";
+    }
+    private void ToggleWindowsStartup(object sender, RoutedEventArgs e)
+    {
+        if (running != null || updateBusy || WindowsApps.SelectedItem is not StartupEntry entry || !SaveConfiguration()) return;
+        var message = "";
+        try
+        {
+            if (!entry.CanManage) throw new InvalidOperationException(entry.Description);
+            if (entry.IsEnabled)
+            {
+                if (entry.Source == "Cartella utente") StartupCatalog.BackupShortcut(entry);
+                var previous = disabledStartup.FirstOrDefault(x => x.Identity == entry.Identity);
+                if (previous != null) disabledStartup.Remove(previous);
+                disabledStartup.Add(entry);
+                if (!SaveConfiguration())
+                {
+                    disabledStartup.Remove(entry);
+                    if (previous != null) disabledStartup.Add(previous);
+                    return;
+                }
+                try { StartupCatalog.Disable(entry); }
+                catch
+                {
+                    disabledStartup.Remove(entry);
+                    if (previous != null) disabledStartup.Add(previous);
+                    SaveConfiguration();
+                    throw;
+                }
+                message = entry.Name + ": avvio Windows disattivato. Puoi riattivarlo da questo elenco.";
+            }
+            else
+            {
+                var backup = disabledStartup.FirstOrDefault(x => x.Identity == entry.Identity)
+                    ?? throw new InvalidOperationException("Backup non disponibile: usa le impostazioni Windows.");
+                StartupCatalog.Restore(backup);
+                disabledStartup.Remove(backup);
+                if (!SaveConfiguration()) { disabledStartup.Add(backup); return; }
+                message = entry.Name + ": avvio Windows riattivato.";
+            }
+        }
+        catch (Exception ex) { message = "Operazione non completata: " + ex.Message; }
+        RefreshWindows(sender, e);
+        StatusText.Text = message;
     }
     private void ImportEntry(StartupEntry entry)
     {
         if (running != null || updateBusy || !SaveConfiguration()) return;
+        if (!entry.IsEnabled) { StatusText.Text = "Riattiva prima questa voce per trasferirla nella sequenza."; return; }
         LaunchItem? item = null;
         try
         {
@@ -92,6 +169,8 @@ public partial class MainWindow : Window
             StartupService.Register(true);
             LoginCheck.IsChecked = true;
             StartupCatalog.Disable(entry);
+            disabledStartup.RemoveAll(x => x.Identity == entry.Identity);
+            SaveConfiguration();
             StatusText.Text = entry.Name + " ora è nella tua sequenza. L’avvio originale è conservato per il ripristino.";
         }
         catch (Exception ex)
@@ -131,7 +210,7 @@ public partial class MainWindow : Window
         if (!AppsGrid.CommitEdit(DataGridEditingUnit.Cell, true) || !AppsGrid.CommitEdit(DataGridEditingUnit.Row, true)) return false;
         if (items.Any(x => string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Path) || x.DelaySeconds < 0 || x.DelaySeconds > 86400))
         { StatusText.Text = "Ogni app richiede nome, percorso e un’attesa fra 0 e 86400 secondi."; return false; }
-        try { SettingsStore.Save(new Configuration { Items = items.ToList(), Repository = UpdateService.Repository }); StatusText.Text = "Configurazione salvata."; return true; }
+        try { SettingsStore.Save(new Configuration { Items = items.ToList(), DisabledStartup = disabledStartup.ToList(), Repository = UpdateService.Repository }); StatusText.Text = "Configurazione salvata."; return true; }
         catch (Exception ex) { StatusText.Text = "Salvataggio fallito: " + ex.Message; return false; }
     }
     private void Save(object sender, RoutedEventArgs e) => SaveConfiguration();
@@ -153,22 +232,10 @@ public partial class MainWindow : Window
         try { if (LoginCheck.IsChecked == true && !SaveConfiguration()) { LoginCheck.IsChecked = false; return; } StartupService.Register(LoginCheck.IsChecked == true); }
         catch (Exception ex) { StatusText.Text = "Impossibile modificare l’avvio: " + ex.Message; LoginCheck.IsChecked = StartupService.IsRegistered(); }
     }
-    private void CheckConflicts(object sender, RoutedEventArgs e) => ShowConflicts();
-    private bool ShowConflicts()
-    {
-        try
-        {
-            var conflicts = StartupService.FindConflicts(items);
-            if (conflicts.Count == 0) { StatusText.Text = "Nessuna corrispondenza nelle origini di avvio accessibili. " + string.Join("; ", StartupCatalog.Warnings.Distinct().Take(2)); return false; }
-            MessageBox.Show(this, "Possibili avvii autonomi da verificare nelle impostazioni Windows o nell’app:\n\n" + string.Join("\n", conflicts) + "\n\nIl rilevamento è basato sul nome: una voce potrebbe essere già disabilitata in Windows.", "Controllo avvio", MessageBoxButton.OK, MessageBoxImage.Information);
-            return true;
-        }
-        catch (Exception ex) { StatusText.Text = "Controllo non riuscito: " + ex.Message; return true; }
-    }
+    private void CheckConflicts(object sender, RoutedEventArgs e) => RefreshWindows(sender, e);
     public async void StartAtLogin()
     {
         if (loadFailed) return;
-        ShowConflicts();
         await RunSequence();
     }
     private void OpenStartupSettings(object sender, RoutedEventArgs e)
@@ -205,6 +272,7 @@ public partial class MainWindow : Window
     private async void CheckUpdates(object sender, RoutedEventArgs e)
     {
         if (updateBusy) return;
+        RefreshWindows(sender, e);
         updateBusy = true;
         CheckUpdateButton.IsEnabled = false;
         InstallUpdateButton.IsEnabled = false;

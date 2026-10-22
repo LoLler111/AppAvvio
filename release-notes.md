@@ -1,15 +1,16 @@
 ## Novità
-- Scansione delle chiavi di avvio del registro nelle viste a 32 e 64 bit, per utente e sistema.
-- Elenco delle voci RunOnce e delle policy, con indicazione della loro gestione specifica.
-- Scansione ricorsiva del Task Scheduler, incluse attività nascoste, per accesso e accensione.
-- Origine e dettagli del comando consultabili nell'elenco.
-- Trasferimento delle attività utente compatibili con backup XML, disattivazione e ripristino.
-- Conservazione degli argomenti e della cartella di lavoro delle attività importate.
-- Controllo dei conflitti esteso anche alle attività pianificate.
-- Logo e icona già presenti nel progetto inclusi nella distribuzione.
+- Controllo della sequenza a ogni apertura e con Aggiorna elenco / Controlla conflitti.
+- Controllo eseguito anche premendo Controlla aggiornamenti.
+- Colonna Configurazione separata dallo stato di esecuzione.
+- Segnalazioni per file mancanti, avvii Windows riattivati, comandi cambiati e attività originali eliminate.
+- Rilevamento di possibili avvii equivalenti in altre origini supportate.
+- Pulsanti Disattiva / Riattiva direttamente nell'elenco Windows, senza inserire una app nella sequenza.
+- Backup delle voci disattivate e persistenza del loro ripristino dopo la riapertura.
 
-## Copertura e limiti
-- Le attività di sistema, prima del login, elevate, con più trigger/azioni o condizioni particolari vengono elencate con il motivo della gestione manuale.
-- RunOnce resta una esecuzione unica e le policy restano gestite dalle loro impostazioni.
-- Eventuali cartelle non accessibili vengono segnalate come scansione parziale.
-- Le app Store con StartupTask e i servizi non sono inclusi.
+## Comportamento
+- I controlli non correggono automaticamente le configurazioni: segnalano i casi da verificare.
+- Le voci disattivate da AppAvvio restano nell'elenco e possono essere riattivate.
+- La disattivazione usa gli stessi limiti di compatibilità delle voci importabili.
+- Le scansioni parziali sono indicate esplicitamente.
+- File e collegamenti sono verificati per la presenza del percorso configurato; non si garantisce che un collegamento punti ancora a una destinazione valida.
+- Servizi e StartupTask Store restano fuori dalla scansione.
