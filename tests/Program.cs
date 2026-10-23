@@ -29,6 +29,30 @@ catch (OperationCanceledException) { }
 Check(waiting.Status == "Annullato", "L'attesa può essere annullata");
 Check(later.Status == "Da avviare", "Dopo l'interruzione non vengono avviate altre app");
 
+var countdown = new LaunchItem { Path = first.Path, DelaySeconds = 2 };
+var observed = new List<string>();
+countdown.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(LaunchItem.Status)) observed.Add(countdown.Status); };
+await StartupService.RunAsync([countdown], CancellationToken.None);
+Check(observed.Contains("Tra 2 s") && observed.Contains("Tra 1 s") && countdown.Status == "File non trovato", "Il conto alla rovescia si aggiorna e termina anche con un file mancante");
+var storageFolder = Path.Combine(Path.GetTempPath(), "AppAvvioUxTest-" + Guid.NewGuid().ToString("N"));
+var storagePath = Path.Combine(storageFolder, "settings.json");
+try
+{
+    var config = new Configuration { QuietStartup = false, Items = [new LaunchItem { Name = "Test", Path = first.Path, DelaySeconds = 30 }] };
+    SettingsStore.Save(config, storagePath);
+    config.Items[0].DelaySeconds = 60;
+    SettingsStore.Save(config, storagePath);
+    Check(SettingsStore.Load(storagePath).Items[0].DelaySeconds == 60 && !SettingsStore.Load(storagePath).QuietStartup, "Attesa e preferenza di avvio discreto persistono dopo la riapertura");
+    Check(SettingsStore.Load(storagePath + ".bak").Items[0].DelaySeconds == 30, "Il salvataggio mantiene una copia della configurazione precedente");
+    config.Items[0].DelaySeconds = -1;
+    try { SettingsStore.Save(config, storagePath); throw new Exception("Attesa negativa salvata"); } catch (InvalidDataException) { }
+    Check(SettingsStore.Load(storagePath).Items[0].DelaySeconds == 60, "Una modifica non valida non sovrascrive i dati salvati");
+    File.WriteAllText(storagePath, "{broken");
+    try { SettingsStore.Load(storagePath); throw new Exception("Configurazione corrotta accettata"); } catch (System.Text.Json.JsonException) { }
+    Check(SettingsStore.Load(storagePath + ".bak").Items.Count == 1, "La lettura di dati corrotti conserva il backup");
+}
+finally { foreach (var file in Directory.EnumerateFiles(storageFolder)) File.Delete(file); Directory.Delete(storageFolder); }
+
 var parsedCommand = StartupCatalog.ParseCommand("\"C:\\Users\\Test\\Discord\\Update.exe\" --processStart Discord.exe");
 Check(parsedCommand.Path.EndsWith("Update.exe") && parsedCommand.Arguments == "--processStart Discord.exe", "Il launcher di Discord mantiene gli argomenti originali");
 var testKey = @"Software\AppAvvioTests\" + Guid.NewGuid().ToString("N");
@@ -152,7 +176,7 @@ if (args.Contains("--render"))
         {
             var app = new App();
             app.InitializeComponent();
-            var window = new MainWindow();
+            var window = new MainWindow(preview: true);
             var grid = (DataGrid)window.FindName("AppsGrid");
             var previewItems = (System.Collections.ObjectModel.ObservableCollection<LaunchItem>)grid.ItemsSource;
             if (previewItems.Count == 0)
@@ -167,6 +191,8 @@ if (args.Contains("--render"))
                 root.Measure(new Size(width, height));
                 root.Arrange(new Rect(0, 0, width, height));
                 root.UpdateLayout();
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+                root.UpdateLayout();
                 var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
                 bitmap.Render(root);
                 var encoder = new PngBitmapEncoder();
@@ -174,10 +200,61 @@ if (args.Contains("--render"))
                 using var file = File.Create("artifacts/screenshots/" + name + ".png");
                 encoder.Save(file);
             }
-            Render("sequence", 1220, 910);
-            Render("sequence-small", 1020, 810);
+            Render("sequence", 1180, 760);
+            Render("sequence-small", 900, 580);
+            var scroller = FindVisual<ScrollViewer>(grid);
+            Check(scroller != null && scroller.ScrollableWidth == 0, "La sequenza non richiede scorrimento orizzontale alla larghezza minima");
+            Check(grid.Columns[1].ActualWidth > 160, "Il nome dell’app mantiene spazio leggibile nella finestra compatta");
+            var enabledBox = FindVisual<CheckBox>(grid)!;
+            var toggled = (LaunchItem)enabledBox.DataContext;
+            enabledBox.IsChecked = false;
+            enabledBox.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+            Check(!toggled.Enabled && toggled.HealthLabel == "In pausa", "L’interruttore mette in pausa l’app senza rimuoverla");
+            enabledBox.IsChecked = true;
+            enabledBox.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+            grid.SelectedIndex = 1;
+            ((Button)window.FindName("UpButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(previewItems[0].Name == "Steam" && previewItems[0].Order == 1 && previewItems[1].Order == 2, "Il riordino aggiorna ordine e selezione senza scrivere le impostazioni reali");
+            ((RadioButton)window.FindName("WindowsNav")).IsChecked = true;
+            var fixtures = new List<StartupEntry> {
+                new() { Name = "Discord", Source = "Registro utente", IsEnabled = true },
+                new() { Name = "Steam", Source = "Cartella utente", IsEnabled = true },
+                new() { Name = "Attività di sistema", Source = "Task Scheduler", ManualReason = "attività di Windows" }
+            };
+            typeof(MainWindow).GetField("allWindowsItems", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(window, fixtures);
+            var filter = (TextBox)window.FindName("WindowsSearch");
+            filter.Text = "Discord";
+            var windowsList = (ListBox)window.FindName("WindowsApps");
+            Check(windowsList.Items.Count == 1, "La ricerca degli avvii filtra per nome");
+            filter.Text = "";
+            Check(windowsList.Items.Count == 2, "Le voci di sistema sono nascoste nella vista semplice");
+            var systemCheck = (CheckBox)window.FindName("ShowSystemCheck");
+            systemCheck.IsChecked = true;
+            systemCheck.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+            Check(windowsList.Items.Count == 3, "Le voci di sistema restano consultabili su richiesta");
+            windowsList.SelectedIndex = 2;
+            Check(!((Button)window.FindName("ImportButton")).IsEnabled && !((Button)window.FindName("ToggleStartupButton")).IsEnabled, "Le azioni non supportate sulle voci di sistema sono disabilitate");
+            windowsList.SelectedIndex = 0;
+            Render("windows-small", 900, 580);
             ((RadioButton)window.FindName("UpdatesNav")).IsChecked = true;
-            Render("updates", 1220, 780);
+            Render("updates", 1180, 760);
+            Check(((TextBlock)window.FindName("StatusText")).Visibility == Visibility.Collapsed, "Gli aggiornamenti non mostrano messaggi della sequenza");
+            ((RadioButton)window.FindName("SequenceNav")).IsChecked = true;
+            previewItems.Clear();
+            Check(!((Button)window.FindName("RunButton")).IsEnabled, "Una sequenza vuota non propone un avvio senza effetto");
+            Render("empty-small", 900, 580);
+            var editor = new AppEditor(new LaunchItem { Name = "Discord", Path = first.Path, Health = "Configurazione OK", DelaySeconds = 30 }, _ => true);
+            root = (FrameworkElement)editor.Content;
+            Render("edit-app", 544, 600);
+            FindVisual<Expander>(root)!.IsExpanded = true;
+            Render("edit-advanced", 544, 600);
+            editor.Close();
+            var picker = new AppPicker([new AvailableApp("Discord", first.Path), new AvailableApp("Steam", second.Path)]);
+            root = (FrameworkElement)picker.Content;
+            Render("add-app", 544, 560);
+            FindVisual<TextBox>(root)!.Text = "Steam";
+            Check(FindVisual<ListBox>(root)!.Items.Count == 1, "Il selettore delle app consente la ricerca per nome");
+            picker.Close();
             window.Close();
         }
         catch (Exception ex) { failure = ex; }
@@ -186,6 +263,17 @@ if (args.Contains("--render"))
     thread.Start();
     thread.Join();
     if (failure != null) throw failure;
-    Console.WriteLine("PASS: Rendering WPF delle due pagine e della dimensione minima");
+    Console.WriteLine("PASS: Rendering WPF delle tre pagine, stato vuoto e modifica app");
+}
+
+static T? FindVisual<T>(DependencyObject root) where T : DependencyObject
+{
+    for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+    {
+        var child = VisualTreeHelper.GetChild(root, i);
+        if (child is T match) return match;
+        if (FindVisual<T>(child) is T nested) return nested;
+    }
+    return null;
 }
 

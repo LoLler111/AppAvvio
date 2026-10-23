@@ -35,14 +35,22 @@ public static class StartupService
             token.ThrowIfCancellationRequested();
             try
             {
-                item.Status = $"In attesa: {item.DelaySeconds} s";
-                await Task.Delay(TimeSpan.FromSeconds(item.DelaySeconds), token);
+                var timer = Stopwatch.StartNew();
+                var delay = TimeSpan.FromSeconds(item.DelaySeconds);
+                while (timer.Elapsed < delay)
+                {
+                    var remaining = delay - timer.Elapsed;
+                    if (remaining <= TimeSpan.Zero) break;
+                    item.Status = $"Tra {(int)Math.Ceiling(remaining.TotalSeconds)} s";
+                    await Task.Delay(remaining < TimeSpan.FromSeconds(1) ? remaining : TimeSpan.FromSeconds(1), token);
+                }
                 token.ThrowIfCancellationRequested();
-                if (!File.Exists(item.Path)) { item.Status = "File non trovato"; continue; }
-                if (System.IO.Path.GetExtension(item.Path).Equals(".exe", StringComparison.OrdinalIgnoreCase) && IsRunning(item.Path))
+                var path = Environment.ExpandEnvironmentVariables(item.Path);
+                if (!File.Exists(path)) { item.Status = "File non trovato"; continue; }
+                if (System.IO.Path.GetExtension(path).Equals(".exe", StringComparison.OrdinalIgnoreCase) && IsRunning(path))
                 { item.Status = "Già in esecuzione"; continue; }
-                using var process = Process.Start(new ProcessStartInfo(item.Path, item.Arguments)
-                { UseShellExecute = true, WorkingDirectory = string.IsNullOrWhiteSpace(item.WorkingDirectory) ? System.IO.Path.GetDirectoryName(item.Path)! : Environment.ExpandEnvironmentVariables(item.WorkingDirectory) });
+                using var process = Process.Start(new ProcessStartInfo(path, item.Arguments)
+                { UseShellExecute = true, WorkingDirectory = string.IsNullOrWhiteSpace(item.WorkingDirectory) ? System.IO.Path.GetDirectoryName(path)! : Environment.ExpandEnvironmentVariables(item.WorkingDirectory) });
                 item.Status = "Avvio richiesto";
             }
             catch (OperationCanceledException) { item.Status = "Annullato"; throw; }

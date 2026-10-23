@@ -17,6 +17,8 @@ public sealed class StartupEntry
     public string WorkingDirectory { get; set; } = "";
     public string ManualReason { get; set; } = "";
     public bool IsEnabled { get; set; } = true;
+    public string EnabledLabel => IsEnabled ? "Attiva" : "Disattivata";
+    public string FriendlyDescription => CanManage ? "Puoi gestire questa app con AppAvvio" : "Gestione manuale · " + (ManualReason.Length > 0 ? ManualReason : "voce di sistema");
     public string Identity => Source + "|" + (RegistryViewId == 0 ? (Environment.Is64BitProcess ? 256 : 512) : RegistryViewId) + "|" + RegistryPath + "|" + Location + "|" + Name;
     public bool CanManage => ManualReason.Length == 0 && (Source is "Registro utente" or "Cartella utente" or "Task Scheduler");
     public string Description => (IsEnabled ? "Attiva · " : "Disattivata · ") + Source + (Source.StartsWith("Registro") ? (RegistryViewId == 512 ? " · 32 bit" : " · 64 bit") + " · " + RegistryPath.Split('\\').Last() : "") + (CanManage ? "" : " · " + (ManualReason.Length > 0 ? ManualReason : "gestione manuale"));

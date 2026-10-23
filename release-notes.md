@@ -1,16 +1,14 @@
 ## Novità
-- Controllo della sequenza a ogni apertura e con Aggiorna elenco / Controlla conflitti.
-- Controllo eseguito anche premendo Controlla aggiornamenti.
-- Colonna Configurazione separata dallo stato di esecuzione.
-- Segnalazioni per file mancanti, avvii Windows riattivati, comandi cambiati e attività originali eliminate.
-- Rilevamento di possibili avvii equivalenti in altre origini supportate.
-- Pulsanti Disattiva / Riattiva direttamente nell'elenco Windows, senza inserire una app nella sequenza.
-- Backup delle voci disattivate e persistenza del loro ripristino dopo la riapertura.
+- La sequenza è al centro: icone delle app, ordine numerato, attese leggibili e dettagli tecnici separati.
+- Aggiunta facilitata con ricerca tra i collegamenti del menu Start e scelta manuale dei file.
+- Modifica guidata delle attese, con opzioni avanzate per percorso, argomenti e cartella di lavoro.
+- Salvataggio automatico di aggiunte, modifiche, pause e riordini.
+- Pagina Avvio di Windows con ricerca e voci di sistema nascoste inizialmente.
+- Azioni esplicite per togliere un’app dalla sequenza o ripristinarne l’avvio Windows.
+- Ricerca degli avvii in background e messaggi che rimangono leggibili.
+- Conto alla rovescia durante le attese e comandi disabilitati quando non utilizzabili.
+- Avvio discreto nell’area di notifica, con riapertura dell’istanza già attiva e avvisi in caso di errore.
+- Layout compatto, testi più chiari e aggiornamenti in una pagina dedicata.
 
-## Comportamento
-- I controlli non correggono automaticamente le configurazioni: segnalano i casi da verificare.
-- Le voci disattivate da AppAvvio restano nell'elenco e possono essere riattivate.
-- La disattivazione usa gli stessi limiti di compatibilità delle voci importabili.
-- Le scansioni parziali sono indicate esplicitamente.
-- File e collegamenti sono verificati per la presenza del percorso configurato; non si garantisce che un collegamento punti ancora a una destinazione valida.
-- Servizi e StartupTask Store restano fuori dalla scansione.
+## Compatibilità
+Le impostazioni precedenti vengono conservate. Gli avvii di sistema non compatibili restano consultabili. I collegamenti del menu Start non includono necessariamente tutte le app installate; resta disponibile la scelta manuale di un file.

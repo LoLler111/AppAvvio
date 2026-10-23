@@ -1,5 +1,7 @@
 <Application x:Class="AppAvvio.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
  <Application.Resources>
+  <DataTemplate x:Key="AvailableAppTemplate"><StackPanel Orientation="Horizontal" Margin="4,8"><Image Source="{Binding Icon}" Width="28" Height="28" Margin="0,0,12,0"/><TextBlock Text="{Binding Name}" VerticalAlignment="Center"/></StackPanel></DataTemplate>
+  <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="White"/><Setter Property="CornerRadius" Value="14"/><Setter Property="BorderBrush" Value="#E1E8ED"/><Setter Property="BorderThickness" Value="1"/></Style>
   <SolidColorBrush x:Key="Ink" Color="#182638"/>
   <SolidColorBrush x:Key="Muted" Color="#66778A"/>
   <SolidColorBrush x:Key="Accent" Color="#17695D"/>
